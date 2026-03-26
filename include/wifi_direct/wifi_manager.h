@@ -53,15 +53,6 @@ private:
     /// @return Networks found, or std::nullopt on failure.
     std::optional<std::vector<NetworkInfo>> scan_with_swift_corewlan();
 
-    /// Scan using system_profiler SPAirPortDataType (fallback method).
-    std::vector<NetworkInfo> scan_with_system_profiler();
-
-    /// Parse system_profiler SPAirPortDataType output.
-    static std::vector<NetworkInfo> parse_system_profiler_output(const std::string& output);
-
-    /// Parse a single property line from system_profiler output into a NetworkInfo.
-    static void parse_network_property(const std::string& line, NetworkInfo& net);
-
     /// Display connection info after successful connection.
     void show_connection_info() const;
 

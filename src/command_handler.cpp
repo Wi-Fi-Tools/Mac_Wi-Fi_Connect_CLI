@@ -228,6 +228,8 @@ int run(int argc, char* argv[]) {
     std::string command = argv[1];
     WiFiManager manager;
 
+    std::cout << "Interface: " << manager.get_interface() << std::endl;
+
     if (command == "scan") {
         bool show_all = false;
         for (int i = 2; i < argc; ++i) {

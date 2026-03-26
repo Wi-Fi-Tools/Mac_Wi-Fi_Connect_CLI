@@ -169,12 +169,11 @@ std::vector<NetworkInfo> WiFiManager::scan_networks(bool show_all) {
     // Primary: Swift CoreWLAN
     auto networks = scan_with_swift_corewlan();
 
-    // Fallback: system_profiler
     if (!networks.has_value()) {
-        std::cout << "[INFO] Falling back to system_profiler scan..." << std::endl;
-        networks = scan_with_system_profiler();
+        std::cout << "[WARN] Swift CoreWLAN scan failed." << std::endl;
+        return {};
     }
-
+        
     auto& nets = networks.value();
     if (!show_all) {
         std::vector<NetworkInfo> filtered;
@@ -218,60 +217,11 @@ std::optional<std::vector<NetworkInfo>> WiFiManager::scan_with_swift_corewlan() 
     }
 
     if (swift_script_path.empty()) {
-        // Fall back to inline Swift code via temp file
-        char tmp_path[] = "/tmp/wifi_scan_XXXXXX.swift";
-        // Use mkstemp-like approach
-        std::string tmp_file = "/tmp/wifi_scan_" + std::to_string(getpid()) + ".swift";
-        std::ofstream ofs(tmp_file);
-        if (!ofs) {
-            std::cerr << "[WARN] Cannot create temp Swift script." << std::endl;
-            return std::nullopt;
-        }
-        ofs << R"SWIFT(
-import Foundation
-import CoreWLAN
-
-guard let iface = CWWiFiClient.shared().interface() else {
-    fputs("ERROR: No Wi-Fi interface found\n", stderr)
-    exit(1)
-}
-
-do {
-    let networks = try iface.scanForNetworks(withName: nil)
-    for net in networks {
-        let ssid = net.ssid ?? ""
-        let bssid = net.bssid ?? ""
-        let rssi = net.rssiValue
-        let channel = net.wlanChannel?.channelNumber ?? 0
-        var security = "Unknown"
-        if net.supportsSecurity(.wpa3Personal) || net.supportsSecurity(.wpa3Enterprise) {
-            security = "WPA3"
-        } else if net.supportsSecurity(.wpa2Personal) || net.supportsSecurity(.wpa2Enterprise) {
-            security = "WPA2"
-        } else if net.supportsSecurity(.wpaPersonal) || net.supportsSecurity(.wpaEnterprise) {
-            security = "WPA"
-        } else if net.supportsSecurity(.dynamicWEP) {
-            security = "WEP"
-        } else if net.supportsSecurity(.none) {
-            security = "Open"
-        }
-        print("\(ssid)|\(bssid)|\(rssi)|\(channel)|\(security)")
-    }
-} catch {
-    fputs("ERROR: \(error.localizedDescription)\n", stderr)
-    exit(1)
-}
-)SWIFT";
-        ofs.close();
-        swift_script_path = tmp_file;
+        std::cerr << "[WARN] Swift CoreWLAN scan script not found." << std::endl;
+        return std::nullopt;
     }
 
     auto res = run_command({"swift", swift_script_path}, 30);
-
-    // Clean up temp file if we created one
-    if (swift_script_path.find("/tmp/wifi_scan_") == 0) {
-        std::filesystem::remove(swift_script_path);
-    }
 
     if (res.exit_code != 0) {
         std::cerr << "[WARN] Swift CoreWLAN scan failed: " << res.stderr_str << std::endl;
@@ -296,108 +246,6 @@ do {
         }
     }
     return networks;
-}
-
-// ---------------------------------------------------------------------------
-// system_profiler scan
-// ---------------------------------------------------------------------------
-std::vector<NetworkInfo> WiFiManager::scan_with_system_profiler() {
-    auto res = run_command({"system_profiler", "SPAirPortDataType"}, 30);
-    if (res.exit_code != 0) {
-        std::cerr << "[WARN] system_profiler scan failed." << std::endl;
-        return {};
-    }
-    return parse_system_profiler_output(res.stdout_str);
-}
-
-std::vector<NetworkInfo> WiFiManager::parse_system_profiler_output(const std::string& output) {
-    std::vector<NetworkInfo> networks;
-    std::istringstream iss(output);
-    std::string line;
-
-    enum class Section { None, Current, Other };
-    Section section = Section::None;
-
-    std::string current_ssid;
-    NetworkInfo current_net;
-    bool has_current = false;
-
-    auto flush_network = [&]() {
-        if (has_current && !current_ssid.empty()) {
-            current_net.ssid = current_ssid;
-            networks.push_back(current_net);
-        }
-        current_ssid.clear();
-        current_net = {"", "N/A", "N/A", "N/A", "N/A"};
-        has_current = false;
-    };
-
-    while (std::getline(iss, line)) {
-        // Trim
-        std::string stripped = line;
-        size_t start = stripped.find_first_not_of(" \t");
-        if (start != std::string::npos) stripped = stripped.substr(start);
-        else stripped.clear();
-
-        if (stripped.find("Current Network Information:") != std::string::npos) {
-            flush_network();
-            section = Section::Current;
-            continue;
-        }
-        if (stripped.find("Other Local Wi-Fi Networks:") != std::string::npos) {
-            flush_network();
-            section = Section::Other;
-            continue;
-        }
-
-        // Detect section end: unindented non-empty line
-        if (!stripped.empty() && !line.empty() && line[0] != ' ' && line[0] != '\t') {
-            flush_network();
-            section = Section::None;
-            continue;
-        }
-
-        if (section == Section::Current || section == Section::Other) {
-            // SSID line: ends with ":" and no other ":" in the name
-            if (!stripped.empty() && stripped.back() == ':') {
-                std::string name = stripped.substr(0, stripped.size() - 1);
-                if (name.find(':') == std::string::npos) {
-                    flush_network();
-                    current_ssid = name;
-                    current_net = {"", "N/A", "N/A", "N/A", "N/A"};
-                    has_current = true;
-                    continue;
-                }
-            }
-            if (has_current) {
-                parse_network_property(stripped, current_net);
-            }
-        }
-    }
-    flush_network();
-    return networks;
-}
-
-void WiFiManager::parse_network_property(const std::string& line, NetworkInfo& net) {
-    std::smatch m;
-    if (line.rfind("Channel:", 0) == 0) {
-        // e.g. "Channel: 44 (5GHz, 40MHz)"
-        if (std::regex_search(line, m, std::regex(R"(Channel:\s*(\d+))"))) {
-            net.channel = m[1].str();
-        }
-    } else if (line.rfind("Security:", 0) == 0) {
-        size_t pos = line.find(':');
-        if (pos != std::string::npos) {
-            std::string val = line.substr(pos + 1);
-            size_t s = val.find_first_not_of(' ');
-            net.security = (s != std::string::npos) ? val.substr(s) : val;
-        }
-    } else if (line.rfind("Signal / Noise:", 0) == 0) {
-        // e.g. "Signal / Noise: -62 dBm / -98 dBm"
-        if (std::regex_search(line, m, std::regex(R"(Signal / Noise:\s*(-?\d+))"))) {
-            net.rssi = m[1].str();
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
