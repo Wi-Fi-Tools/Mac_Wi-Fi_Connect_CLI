@@ -11,6 +11,7 @@ set(SOURCES
     src/main.cpp
     src/wifi_manager.cpp
     src/command_handler.cpp
+    src/tcp.cpp
 )
 
 # Executable

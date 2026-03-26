@@ -2,6 +2,7 @@
 #define WIFI_DIRECT_COMMAND_HANDLER_H
 
 #include "wifi_manager.h"
+#include "communication/tcp.h"
 #include <iostream>
 #include <string>
 #include <vector>
@@ -22,6 +23,9 @@ void cmd_status(WiFiManager& manager);
 
 /// Handle the "disconnect" command.
 void cmd_disconnect(WiFiManager& manager);
+
+/// Handle the "tcp_server" command.
+void cmd_tcp_server(int port);
 
 /// Print usage/help information.
 void print_usage(const char* program_name);

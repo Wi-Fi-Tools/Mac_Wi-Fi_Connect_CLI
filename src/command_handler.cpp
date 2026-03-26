@@ -1,4 +1,5 @@
 #include "wifi_direct/command_handler.h"
+#include "communication/tcp.h"
 
 #include <algorithm>
 #include <iomanip>
@@ -196,6 +197,27 @@ void cmd_disconnect(WiFiManager& manager) {
 }
 
 // ---------------------------------------------------------------------------
+// cmd_tcp_server
+// ---------------------------------------------------------------------------
+void cmd_tcp_server(int port) {
+    std::cout << "[INFO] Starting TCP server on port " << port << "..." << std::endl;
+    TcpServer server(port);
+    if (!server.Listen()) {
+        std::cout << "[ERROR] Failed to start TCP server." << std::endl;
+        return;
+    }
+    if (!server.Accept()) {
+        std::cout << "[ERROR] Failed to accept connection." << std::endl;
+        return;
+    }
+    std::string message;
+    server.Receive(message);
+    std::cout << "[INFO] Received message: " << message << std::endl;
+    server.Send("Hello from Mac!");
+    server.Close();
+}
+
+// ---------------------------------------------------------------------------
 // Usage
 // ---------------------------------------------------------------------------
 void print_usage(const char* program_name) {
@@ -206,10 +228,12 @@ void print_usage(const char* program_name) {
               << "  " << program_name << " connect -s <SSID> -p <password> Connect directly\n"
               << "  " << program_name << " status                          Show Wi-Fi status\n"
               << "  " << program_name << " disconnect                      Disconnect\n\n"
+              << "  " << program_name << " tcp_server -p <port>            Start a TCP server\n"
               << "Options:\n"
               << "  --all, -a    Show all Wi-Fi networks (not just Wi-Fi Direct)\n"
               << "  -s <SSID>    SSID of the network to connect to\n"
-              << "  -p <pass>    Password for the network\n\n"
+              << "  -p <pass>    Password for the network\n"
+              << "  -p <port>    Port number for the TCP server\n\n"
               << "Notes:\n"
               << "  - Android Wi-Fi Direct hotspot SSIDs typically start with 'DIRECT-'.\n"
               << "  - Some operations may require administrator privileges (sudo).\n"
@@ -256,6 +280,15 @@ int run(int argc, char* argv[]) {
     } else if (command == "disconnect") {
         cmd_disconnect(manager);
 
+    } else if (command == "tcp_server") {
+        int port = 8080;
+        for (int i = 2; i < argc; ++i) {
+            std::string arg = argv[i];
+            if ((arg == "-p" || arg == "--port") && i + 1 < argc) {
+                port = std::stoi(argv[++i]);
+            }
+        }
+        cmd_tcp_server(port);
     } else if (command == "--help" || command == "-h") {
         print_usage(argv[0]);
 
